@@ -17,9 +17,9 @@ const (
 	Speed_Limit = 20
 
 	Separation_Distance = 5
-	Separation_Factor = 30
-	Alignment_Distance = 6
-	Alignment_Factor = 20
+	Separation_Factor = 40
+	Alignment_Distance = 2000
+	Alignment_Factor = 2000
 	Cohesion_Distance = 12
 	Cohesion_Factor = 10
 
@@ -33,7 +33,7 @@ var (
 	window_height = 768
 	World_Size_Width = 1200.0
 	World_Size_Height = 800.0
-	population_size = 1000
+	population_size = 1
 
 )
 
@@ -86,13 +86,14 @@ func (b *Boid) limitVelo(){
 
 func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 	updatedBoid := new(Boid)
-
+	*updatedBoid = *b
 	var acceleration pixel.Vec
 
 
-	boidsNear := b.boids_near(otherBoids, 10)
+	boidsNear := b.boids_near(otherBoids, 2000)
 	for _, bNear := range boidsNear{
 			diff_vector := b.diff_vector(bNear)
+			fmt.Println("diff vector: ", diff_vector)
 			distance := b.distance_to(bNear)
 			if distance < Separation_Distance {
 				acceleration.Add( diff_vector.Scaled( -Separation_Factor ) )
@@ -116,6 +117,7 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 	updatedBoid.velocity.Add( acceleration )
 	updatedBoid.limitVelo()
 	updatedBoid.position.Add( updatedBoid.velocity)
+	fmt.Println("new position: ", updatedBoid.position)
 
 	for updatedBoid.position.X < 0 {
 		updatedBoid.position.X += World_Size_Width
@@ -132,7 +134,7 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 	for updatedBoid.position.Y > World_Size_Height {
 		updatedBoid.position.Y -= World_Size_Height
 	}
-
+	fmt.Println("in update", updatedBoid.position)
 	outBoid <- updatedBoid
 }
 
@@ -154,6 +156,7 @@ func loop_state(last_state []*Boid,  state_channel chan []*Boid) {
 		new_state := make( []*Boid, population_size )
 
 		for i := 0; i < len( new_state ); i++ {
+			fmt.Println(last_state[i].position)
 			if last_state != nil && len( last_state ) > i {
 				//fmt.Println( last_state[ i ].velocity.X, last_state[ i ].velocity.Y)
 				go last_state[ i ].updateBoid(last_state, boid_updates )
@@ -183,10 +186,10 @@ func run() {
 	for i:=0; i<population_size; i++ {
 		last_state = append(last_state, create_boid())
 	}
+	state_channel := make( chan []*Boid )
 
 	for !win.Closed() {
 		win.Clear(colornames.White)
-		state_channel := make( chan []*Boid )
 		go loop_state(last_state, state_channel)
 		draw_state( <- state_channel, win )
 
@@ -203,6 +206,7 @@ func draw_state( state []*Boid, win *pixelgl.Window) {
 	fmt.Println("started drawing")
 
 	for _, boid := range state {
+		fmt.Println("reading", boid.position)
 		boid.drawBoid(win)
 	}
 
@@ -216,6 +220,6 @@ func (b *Boid) drawBoid(win *pixelgl.Window) {
 	imd.Push(b.position)
 	imd.Push(b.position.Add(pixel.V(20,20)))
 	imd.Push(b.position.Sub(pixel.V(20,20)))
-	imd.Polygon(0)
+	imd.Polygon(20)
 	imd.Draw(win)
 }
