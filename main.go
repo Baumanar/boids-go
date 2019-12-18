@@ -17,9 +17,9 @@ const (
 	Acceleration_Limit = 5
 	Speed_Limit = 10
 
-	Separation_Distance = 0.01
+	Separation_Distance = 3
 	Separation_Factor = 1
-	Alignment_Distance = 50
+	Alignment_Distance = 100
 	Alignment_Factor = 3
 	Cohesion_Distance = 100
 	Cohesion_Factor = 3
@@ -93,32 +93,49 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 
 
 	boidsNear := b.boids_near(otherBoids, 200)
+
+	var vec_align pixel.Vec
+	count_align := 0
+	var vec_cohesion pixel.Vec
+	count_cohesion := 0
+	var vec_separation pixel.Vec
+	count_separation := 0
+
 	//fmt.Println("number of near boids: ", len(boidsNear))
 	for _, bNear := range boidsNear{
+
+
 			diff_vector := b.diff_vector(bNear)
 			//fmt.Println("diff vector: ", diff_vector)
 			distance := b.distance_to(bNear)
 		//fmt.Println("distance: ", distance)
+			if distance < Alignment_Distance {
+
+				vec_align = vec_align.Add( bNear.velocity)
+				count_align++
+			}
+
+			if distance < Cohesion_Distance {
+				vec_cohesion = vec_cohesion.Add( bNear.position)
+				count_cohesion++
+			}
+
 			if distance < Separation_Distance {
-
-				acceleration = acceleration.Add( diff_vector.Scaled( Separation_Factor ) )
+				vec_separation = vec_separation.Add(diff_vector).Scaled(distance)
+				count_separation++
 			}
 
-			if distance < Alignment_Distance {
-				acceleration = acceleration.Add( diff_vector.Scaled( -Cohesion_Factor ) )
-			}
-
-			if distance < Alignment_Distance {
-				acceleration = acceleration.Add( bNear.velocity.Scaled( -Alignment_Factor ) )
-			}
-
-			square_acceleration_magnitude := norm(acceleration)
-
-			if ( square_acceleration_magnitude > (  Acceleration_Limit ) ) {
-				acceleration = acceleration.Scaled( Acceleration_Limit / math.Sqrt( square_acceleration_magnitude ) )
-			}
+//			square_acceleration_magnitude := norm(acceleration)
+//
+//			if ( square_acceleration_magnitude > (  Acceleration_Limit ) ) {
+//				acceleration = acceleration.Scaled( Acceleration_Limit / math.Sqrt( square_acceleration_magnitude ) )
+//			}
 
 	}
+	vec_align = vec_align.Scaled(1.0/count_align)
+	vec_cohesion = vec_align.Scaled(1.0/count_cohesion)
+	vec_separation = vec_align.Scaled(1.0/count_separation)
+	acceleration = acceleration.Add(vec_align).Add(vec_cohesion).Add(vec_separation)
 	//fmt.Println("acc: ", acceleration)
 	//fmt.Println("speed: ", updatedBoid.velocity)
 
