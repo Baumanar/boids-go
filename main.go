@@ -18,9 +18,9 @@ const (
 	Acceleration_Limit = 20
 	Speed_Limit = 5
 	Avoid_Distance = 20
-	Separation_Distance = 20
-	Alignment_Distance = 50
-	Cohesion_Distance = 50
+	Separation_Distance = 10000
+	Alignment_Distance = 10000
+	Cohesion_Distance = 10000
 )
 
 
@@ -31,7 +31,7 @@ var (
 	window_height = 1000.0
 	World_Size_Width = 1400.0
 	World_Size_Height = 1000.0
-	population_size = 60
+	population_size = 3
 	hunter_size = 3
 
 )
@@ -112,27 +112,27 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid, outBoid chan *
 	var acceleration pixel.Vec
 
 
-	boidsNear, _ := b.boids_near(otherBoids, 200)
-	huntesrNear, _ := b.boids_near(predators, 200)
+	boidsNear, _ := b.boids_near(otherBoids, 10000)
+	//huntersNear, _ := b.boids_near(predators, 10000)
 
 
-	vec_avoid := pixel.V(0.0, 0.0)
-	count_avoid := 0.0
+	//vec_avoid := pixel.V(0.0, 0.0)
+	//count_avoid := 0.0
 	vec_align := pixel.V(0.0, 0.0)
 	count_align := 0.0
 	vec_cohesion := pixel.V(0.0, 0.0)
 	count_cohesion := 0.0
 	vec_separation := pixel.V(0.0, 0.0)
 	count_separation := 0.0
-
+	//fmt.Println("bumber of boids near: ", len(boidsNear))
 	for _, bNear := range boidsNear{
 
 		diff_vector := b.diff_vector(bNear)
+		//fmt.Println("diff_vector", diff_vector)
 		distance := b.distance_to(bNear)
 		if distance < Alignment_Distance {
 
 			vec_align = vec_align.Add( bNear.velocity)
-			//fmt.Println("in update", vec_align)
 			count_align++
 		}
 
@@ -147,15 +147,15 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid, outBoid chan *
 		}
 	}
 
-	for _, hunterNear := range huntesrNear{
+	/*for _, hunterNear := range huntersNear{
 		distance := b.distance_to(hunterNear)
 		if distance < Avoid_Distance {
 			vec_avoid = vec_avoid.Add( hunterNear.velocity).Scaled(2)
 			count_avoid++
 		}
-	}
+	}*/
 
-	vec_avoid = limitAcc(vec_avoid)
+	//vec_avoid = limitAcc(vec_avoid)
 	vec_separation = limitAcc(vec_separation)
 	vec_align = limitAcc(vec_align)
 	vec_cohesion = limitAcc(vec_cohesion)
@@ -173,23 +173,24 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid, outBoid chan *
 	}
 
 	if count_separation > 0 {
-		vec_separation = vec_separation.Scaled(1.0/count_align)
+		vec_separation = vec_separation.Scaled(1.0/count_separation)
 		vec_separation = vec_separation.Sub(b.velocity).Scaled(0.14)
 		acceleration = acceleration.Add(vec_separation)
 	}
 
-	if count_avoid > 0 {
-		vec_avoid = vec_avoid.Scaled(1.0/count_align)
+/*	if count_avoid > 0 {
+		vec_avoid = vec_avoid.Scaled(1.0/count_avoid)
 		acceleration = acceleration.Add(vec_avoid)
-	}
+	}*/
 
 	//acceleration= acceleration.Add(pixel.V(rand.Float64()*1-0.5, rand.Float64()*1-0.5))
-
+	//fmt.Println("acc: ", acceleration)
 
 	//fmt.Println(vec_align, vec_cohesion, vec_separation)
 	updatedBoid.velocity = updatedBoid.velocity.Add( acceleration )
 	updatedBoid.limitVelo()
 	//updatedBoid.velocity = pixel.V(0,0)
+	//fmt.Println("velo: ", updatedBoid.velocity)
 
 	updatedBoid.position = updatedBoid.position.Add( updatedBoid.velocity)
 
@@ -218,8 +219,11 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid, outBoid chan *
 func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
 	updatedBoid := new(Boid)
 	*updatedBoid = *b
-	_, nearestBoid := b.boids_near(otherBoids, 100)
-	acceleration := b.diff_vector(nearestBoid)
+	_, nearestBoid := b.boids_near(otherBoids, 300)
+	acceleration := pixel.V(0.0,0.0)
+	if nearestBoid != nil {
+		acceleration = b.diff_vector(nearestBoid)
+	}
 
 	updatedBoid.velocity = updatedBoid.velocity.Add( acceleration )
 	updatedBoid.limitVelo()
@@ -269,7 +273,7 @@ func loop_state(last_state_boids []*Boid, last_state_hunters []*Boid,  state_cha
 		go last_state_boids[ i ].updateBoid(last_state_boids, last_state_hunters, boid_updates )
 	}
 	for i := 0; i < len( last_state_hunters); i++ {
-		go last_state_hunters[ i ].updateBoid(last_state_boids, last_state_hunters, hunter_updates )
+		go last_state_hunters[ i ].updateHunter(last_state_boids, hunter_updates )
 	}
 	var wg sync.WaitGroup
 	//start := time.Now()
@@ -338,7 +342,7 @@ func run() {
 
 		last_state_hunter := <- state_channel_hunters
 		//fmt.Println("got boids")
-		fmt.Println(last_state_boid[0].position)
+		fmt.Println(last_state_boid[0].position, last_state_boid[1].position, last_state_boid[0].position)
 		draw_state( last_state_boid, win )
 		//fmt.Println("got hunters")
 		draw_state( last_state_hunter, win )
