@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/pixelgl"
 	"golang.org/x/image/colornames"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -16,8 +16,8 @@ const (
 
 	Acceleration_Limit = 20
 	Speed_Limit = 5
-	Avoid_Distance = 20
-	Separation_Distance = 20
+	Avoid_Distance = 200
+	Separation_Distance = 13
 	Alignment_Distance = 50
 	Cohesion_Distance = 50
 )
@@ -29,8 +29,9 @@ var (
 	window_width = 1024
 	window_height = 768
 	World_Size_Width = 1400.0
-	World_Size_Height = 1200.0
-	population_size = 500
+	World_Size_Height = 1000.0
+	population_size = 400
+	hunter_size = 5
 
 )
 
@@ -41,8 +42,6 @@ type Boid struct {
 	last_updated time.Time
 	color pixel.RGBA
 }
-
-
 
 
 
@@ -58,24 +57,33 @@ func (b *Boid) diff_vector(otherBoid *Boid) pixel.Vec{
 func (b *Boid) distance_to(otherBoid *Boid) float64 {
 	vec := b.position
 	other := otherBoid.position
-	return math.Sqrt( ( other.X - vec.X ) * ( other.X - vec.X ) + ( other.Y - vec.Y ) * ( other.Y - vec.Y ) )
+	dist_borders := math.Sqrt( ( math.Abs(other.X-World_Size_Width) + vec.X ) * ( math.Abs(other.X-World_Size_Width) + vec.X ) + ( math.Abs(other.Y-World_Size_Height) + vec.Y ) * ( math.Abs(other.Y-World_Size_Height) + vec.Y ))
+	dist := math.Sqrt( ( other.X - vec.X ) * ( other.X - vec.X ) + ( other.Y - vec.Y ) * ( other.Y - vec.Y ) )
+	return  math.Min(dist, dist_borders)
+
 }
 
-func (b *Boid) boids_near (otherBoids []*Boid, distance_min float64) []*Boid{
+func (b *Boid) boids_near (otherBoids []*Boid, distance_min float64) ([]*Boid, *Boid){
 	boids_near := make([]*Boid, 0)
+	var min_dist = 10000000.0
+	var minBoid *Boid
 	for _, boid := range otherBoids{
 		if b != boid{
-			if(b.distance_to(boid)<distance_min){
+			curr_distance := b.distance_to(boid)
+			if(curr_distance<distance_min){
 				boids_near = append(boids_near, boid)
+				if (curr_distance < min_dist){
+					min_dist = curr_distance
+					minBoid = boid
+				}
 			}
 		}
 	}
-	return boids_near
+	return boids_near, minBoid
 }
 
 func (b *Boid) limitVelo(){
 	square_speed := norm(b.velocity)
-	fmt.Println(square_speed)
 	if square_speed > ( Speed_Limit ) {
 		b.velocity = b.velocity.Scaled( Speed_Limit / math.Sqrt( square_speed ) )
 	}
@@ -88,14 +96,17 @@ func limitAcc(v pixel.Vec) pixel.Vec{
 	return v
 }
 
-func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
+func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *Boid){
 	updatedBoid := new(Boid)
 	*updatedBoid = *b
 	var acceleration pixel.Vec
 
 
-	boidsNear := b.boids_near(otherBoids, 200)
+	boidsNear, _ := b.boids_near(otherBoids, 200)
+	huntersNear, _ := b.boids_near(predators, 100)
 
+	vec_avoid := pixel.V(0.0, 0.0)
+	count_avoid := 0.0
 	vec_align := pixel.V(0.0, 0.0)
 	count_align := 0.0
 	vec_cohesion := pixel.V(0.0, 0.0)
@@ -121,20 +132,26 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 		}
 
 		if distance < Separation_Distance {
-			vec_separation = diff_vector.Scaled(6.0/distance)
+			vec_separation = diff_vector.Scaled(3.0/distance)
 			count_separation++
 		}
 
-		//			square_acceleration_magnitude := norm(acceleration)
-		//
-		//			if ( square_acceleration_magnitude > (  Acceleration_Limit ) ) {
-		//				acceleration = acceleration.Scaled( Acceleration_Limit / math.Sqrt( square_acceleration_magnitude ) )
-		//			}
 
 	}
+
+	for _, hunterNear := range huntersNear{
+		distance := b.distance_to(hunterNear)
+		if distance < Avoid_Distance {
+
+			vec_avoid = vec_avoid.Sub( b.diff_vector(hunterNear)).Scaled(2/distance)
+			count_avoid++
+		}
+	}
+
 	vec_separation = limitAcc(vec_separation)
 	vec_align = limitAcc(vec_align)
 	vec_cohesion = limitAcc(vec_cohesion)
+	vec_avoid = limitAcc(vec_avoid)
 
 	if count_align > 0 {
 		vec_align = vec_align.Scaled(1.0/count_align)
@@ -144,7 +161,7 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 
 	if count_cohesion > 0 {
 		vec_cohesion = vec_cohesion.Scaled(1.0/count_cohesion)
-		vec_cohesion = vec_cohesion.Sub(b.velocity).Scaled(0.00325)
+		vec_cohesion = vec_cohesion.Sub(b.velocity).Scaled(0.00825)
 		acceleration = acceleration.Add(vec_cohesion)
 	}
 
@@ -152,6 +169,11 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 		vec_separation = vec_separation.Scaled(1.0/count_separation)
 		vec_separation = vec_separation.Sub(b.velocity).Scaled(0.054)
 		acceleration = acceleration.Add(vec_separation)
+	}
+
+	if count_avoid > 0 {
+		vec_avoid = vec_avoid.Sub(b.velocity).Scaled(1.0/count_avoid)
+		acceleration = acceleration.Sub(vec_avoid)
 	}
 
 
@@ -180,44 +202,146 @@ func (b *Boid) updateBoid (otherBoids []*Boid, outBoid chan *Boid){
 	outBoid <- updatedBoid
 }
 
+func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
+	updatedBoid := new(Boid)
+	*updatedBoid = *b
+	var acceleration pixel.Vec
 
-func create_boid () *Boid {
+	boidsNear, nearestBoid := b.boids_near(otherBoids, 100)
+
+	vec_attack := pixel.V(0.0,0.0)
+	count_attack := 0.0
+
+	vec_cohesion := pixel.V(0.0, 0.0)
+	count_cohesion := 0.0
+
+
+	for _, bNear := range boidsNear{
+
+		distance := b.distance_to(bNear)
+		if distance < 50 {
+			vec_cohesion = vec_cohesion.Add( bNear.velocity)
+			count_cohesion++
+		}
+	}
+
+	if nearestBoid != nil {
+		vec_attack = b.diff_vector(nearestBoid).Scaled(-0.01)
+		count_attack ++
+	}
+
+
+	if count_cohesion > 0 {
+		vec_cohesion = vec_cohesion.Scaled(1.0/count_cohesion)
+		vec_cohesion = vec_cohesion.Sub(b.velocity).Scaled(0.0325)
+		acceleration = acceleration.Add(vec_cohesion)
+	}
+
+	if count_attack > 0 {
+		acceleration = acceleration.Add(vec_attack)
+	}
+
+	limitAcc(acceleration)
+	updatedBoid.velocity = updatedBoid.velocity.Add( acceleration )
+	updatedBoid.limitVelo()
+
+	updatedBoid.position = updatedBoid.position.Add( updatedBoid.velocity)
+
+	for updatedBoid.position.X < 0 {
+		updatedBoid.position.X += World_Size_Width
+	}
+
+	for updatedBoid.position.X > World_Size_Width {
+		updatedBoid.position.X -= World_Size_Width
+	}
+
+	for updatedBoid.position.Y < 0 {
+		updatedBoid.position.Y += World_Size_Height
+	}
+
+	for updatedBoid.position.Y > World_Size_Height {
+		updatedBoid.position.Y -= World_Size_Height
+	}
+
+	outBoid <- updatedBoid
+
+}
+
+
+
+
+func create_boid (color pixel.RGBA) *Boid {
 	new_boid := new( Boid )
 	new_boid.position.X = rand.Float64() * World_Size_Width - 400
 	new_boid.position.Y = rand.Float64() * World_Size_Height - 400
 	new_boid.velocity.X = rand.Float64() * 4 -2
 	new_boid.velocity.Y = rand.Float64() * 4 -2
 	new_boid.last_updated = time.Now()
-	new_boid.color = pixel.RGB(1, 0, 0)
+	new_boid.color = color
 
 	return new_boid
 }
 
-func loop_state(last_state []*Boid,  state_channel chan []*Boid, boid_updates chan *Boid) {
+func loop_state(last_state []*Boid,  state_channel chan []*Boid, boid_updates chan *Boid, last_state_hunter []*Boid,  state_channel_hunter chan []*Boid, hunter_updates chan *Boid) {
 	//fmt.Println("started updating")
 	new_state := make( []*Boid, population_size )
+
+	new_state_hunter := make([]*Boid, hunter_size)
+
+
 	for i := 0; i < len( last_state ); i++ {
-		//fmt.Println(last_state[i].position)
-		//if last_state != nil && len( last_state ) > i {
-		//fmt.Println( last_state[ i ].velocity.X, last_state[ i ].velocity.Y)
-		go last_state[ i ].updateBoid(last_state, boid_updates )
-		//}
+		go last_state[ i ].updateBoid(last_state, last_state_hunter, boid_updates )
 	}
-	for i := 0; i < len( last_state ); i++ {
-		x, ok := <-boid_updates
-		if ok{
-			new_state[i] = x
+
+	for i := 0; i < len( last_state_hunter); i++ {
+		go last_state_hunter[ i ].updateHunter(last_state, hunter_updates )
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	go func() {
+		for i := 0; i < len( last_state ); i++ {
+			x, ok := <-boid_updates
+			if ok{
+				new_state[i] = x
+			}
 		}
-	}
+		wg.Done()
+	}()
+
+
+	go func() {
+		for i := 0; i<len(last_state_hunter); i++ {
+			x, ok := <-hunter_updates
+			if ok{
+				new_state_hunter[i] =  x
+			}
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+
 	state_channel <- new_state
+	state_channel_hunter <- new_state_hunter
 
 }
 
+func sum(input []int) int {
+	sum := 0
+
+	for _, i := range input {
+		sum += i
+	}
+	return sum
+}
 
 func run() {
+	rand.Seed(time.Now().UnixNano())
 	cfg := pixelgl.WindowConfig{
 		Title:  "Pixel Rocks!",
-		Bounds: pixel.R(0, 0, 1200, 800),
+		Bounds: pixel.R(0, 0, World_Size_Width, World_Size_Height),
 		VSync:  true,
 	}
 	win, err := pixelgl.NewWindow(cfg)
@@ -225,21 +349,58 @@ func run() {
 		panic(err)
 	}
 
+
+	///////////////////////////
+	last_state_hunter := make([]*Boid, 0)
+
+	for i:=0; i<hunter_size; i++ {
+		last_state_hunter = append(last_state_hunter, create_boid(pixel.RGB(0,0,1)))
+	}
+
+	state_channel_hunter := make( chan []*Boid )
+	hunter_updates := make( chan *Boid, 1 )
+	///////////////////////////
+
+
 	last_state := make([]*Boid, 0)
 	for i:=0; i<population_size; i++ {
-		last_state = append(last_state, create_boid())
+		last_state = append(last_state, create_boid(pixel.RGB(1,0,0)))
 	}
 	state_channel := make( chan []*Boid )
 	boid_updates := make( chan *Boid, 1 )
+
+
+
+	iter := 1
 	for !win.Closed() {
 		win.Clear(colornames.White)
-		go loop_state(last_state, state_channel, boid_updates)
-		x, ok := <- state_channel
-		if ok {
-			last_state = x
-			draw_state( x, win )
+		go loop_state(last_state, state_channel, boid_updates, last_state_hunter, state_channel_hunter, hunter_updates)
 
-		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			x, ok := <- state_channel
+			if ok {
+				last_state = x
+				draw_state( x, win )
+
+			}
+			wg.Done()
+		}()
+
+		go func() {
+			x, ok := <- state_channel_hunter
+			if ok {
+				last_state_hunter = x
+				draw_state( x, win )
+
+			}
+			wg.Done()
+		}()
+		wg.Wait()
+		iter ++
+
+
 		win.Update()
 	}
 }
