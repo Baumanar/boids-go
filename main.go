@@ -14,12 +14,12 @@ import (
 
 const (
 
-	Acceleration_Limit = 20
+	Acceleration_Limit = 30
 	Speed_Limit = 5
 	Avoid_Distance = 200
 	Separation_Distance = 13
-	Alignment_Distance = 50
-	Cohesion_Distance = 50
+	Alignment_Distance = 90
+	Cohesion_Distance = 90
 )
 
 
@@ -31,7 +31,7 @@ var (
 	World_Size_Width = 1400.0
 	World_Size_Height = 1000.0
 	population_size = 400
-	hunter_size = 5
+	hunter_size = 8
 
 )
 
@@ -43,6 +43,10 @@ type Boid struct {
 	color pixel.RGBA
 }
 
+
+func angle(v1 pixel.Vec, v2 pixel.Vec) float64{
+	return math.Acos(v1.Dot(v2) / (math.Sqrt(norm(v1)) * math.Sqrt(norm(v2))))
+}
 
 
 func norm(vec pixel.Vec) float64 {
@@ -63,7 +67,10 @@ func (b *Boid) distance_to(otherBoid *Boid) float64 {
 
 }
 
-func (b *Boid) boids_near (otherBoids []*Boid, distance_min float64) ([]*Boid, *Boid){
+func (b *Boid) boids_near (otherBoids []*Boid, distance_min float64, periphery bool) ([]*Boid, *Boid){
+
+	peripheryAngle := math.Pi * 0.70;
+
 	boids_near := make([]*Boid, 0)
 	var min_dist = 10000000.0
 	var minBoid *Boid
@@ -71,11 +78,23 @@ func (b *Boid) boids_near (otherBoids []*Boid, distance_min float64) ([]*Boid, *
 		if b != boid{
 			curr_distance := b.distance_to(boid)
 			if(curr_distance<distance_min){
-				boids_near = append(boids_near, boid)
-				if (curr_distance < min_dist){
-					min_dist = curr_distance
-					minBoid = boid
+
+				diff_vec := b.diff_vector(boid)
+				angle := angle(diff_vec, b.velocity)
+				if periphery && angle < peripheryAngle{
+					boids_near = append(boids_near, boid)
+					if curr_distance < min_dist {
+						min_dist = curr_distance
+						minBoid = boid
+					}
+				} else {
+					boids_near = append(boids_near, boid)
+					if curr_distance < min_dist {
+						min_dist = curr_distance
+						minBoid = boid
+					}
 				}
+
 			}
 		}
 	}
@@ -102,8 +121,8 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	var acceleration pixel.Vec
 
 
-	boidsNear, _ := b.boids_near(otherBoids, 200)
-	huntersNear, _ := b.boids_near(predators, 100)
+	boidsNear, _ := b.boids_near(otherBoids, 200, true)
+	huntersNear, _ := b.boids_near(predators, 100, true)
 
 	vec_avoid := pixel.V(0.0, 0.0)
 	count_avoid := 0.0
@@ -120,14 +139,14 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 		diff_vector := b.diff_vector(bNear)
 		//fmt.Println("diff_vector", diff_vector)
 		distance := b.distance_to(bNear)
-		if distance < Alignment_Distance {
 
-			vec_align = vec_align.Add( bNear.velocity)
+		if distance < Alignment_Distance {
+			vec_align = vec_align.Add( bNear.velocity).Scaled(1.0)
 			count_align++
 		}
 
 		if distance < Cohesion_Distance {
-			vec_cohesion = vec_cohesion.Add( bNear.position)
+			vec_cohesion = vec_cohesion.Add( bNear.position).Scaled(1.0)
 			count_cohesion++
 		}
 
@@ -142,8 +161,7 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	for _, hunterNear := range huntersNear{
 		distance := b.distance_to(hunterNear)
 		if distance < Avoid_Distance {
-
-			vec_avoid = vec_avoid.Sub( b.diff_vector(hunterNear)).Scaled(2/distance)
+			vec_avoid = vec_avoid.Sub( b.diff_vector(hunterNear)).Scaled(0.4/distance)
 			count_avoid++
 		}
 	}
@@ -153,9 +171,11 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	vec_cohesion = limitAcc(vec_cohesion)
 	vec_avoid = limitAcc(vec_avoid)
 
+
+
 	if count_align > 0 {
 		vec_align = vec_align.Scaled(1.0/count_align)
-		vec_align = vec_align.Sub(b.velocity).Scaled(0.4)
+		vec_align = vec_align.Sub(b.velocity).Scaled(0.44)
 		acceleration = acceleration.Add(vec_align)
 	}
 
@@ -172,12 +192,13 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	}
 
 	if count_avoid > 0 {
-		vec_avoid = vec_avoid.Sub(b.velocity).Scaled(1.0/count_avoid)
+		vec_avoid = vec_avoid.Sub(b.velocity).Scaled(10/count_avoid)
 		acceleration = acceleration.Sub(vec_avoid)
 	}
 
 
-	//fmt.Println("acc: ", acceleration)
+	acceleration = limitAcc(acceleration)
+
 	//fmt.Println("speed: ", updatedBoid.velocity)
 
 	updatedBoid.velocity = updatedBoid.velocity.Add( acceleration )
@@ -202,12 +223,13 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	outBoid <- updatedBoid
 }
 
+
 func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
 	updatedBoid := new(Boid)
 	*updatedBoid = *b
 	var acceleration pixel.Vec
 
-	boidsNear, nearestBoid := b.boids_near(otherBoids, 100)
+	boidsNear, nearestBoid := b.boids_near(otherBoids, 300, false)
 
 	vec_attack := pixel.V(0.0,0.0)
 	count_attack := 0.0
@@ -233,7 +255,7 @@ func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
 
 	if count_cohesion > 0 {
 		vec_cohesion = vec_cohesion.Scaled(1.0/count_cohesion)
-		vec_cohesion = vec_cohesion.Sub(b.velocity).Scaled(0.0325)
+		vec_cohesion = vec_cohesion.Sub(b.velocity).Scaled(0.0525)
 		acceleration = acceleration.Add(vec_cohesion)
 	}
 
@@ -424,9 +446,9 @@ func (b *Boid) drawBoid(win *pixelgl.Window) {
 	imd := imdraw.New(nil)
 	imd.Color = b.color
 	imd.Push(b.position)
-	vec := b.position.Sub(pixel.V(20, 7))
+	vec := b.position.Sub(pixel.V(13, 3))
 	imd.Push(vec)
-	vec = b.position.Add(pixel.V(-20, 7))
+	vec = b.position.Add(pixel.V(-13, 3))
 	//imd.Push(pixel.V(600, 600))
 	imd.Push(vec)
 	mat = mat.Rotated(b.position,  math.Atan2( b.velocity.Y, b.velocity.X ))
