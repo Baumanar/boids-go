@@ -127,15 +127,9 @@ func (b *Boid) updateBoid (otherBoids []*Boid, predators []*Boid,outBoid chan *B
 	boidsNear, _ := b.boids_near(otherBoids, 200, true)
 	huntersNear, _ := b.boids_near(predators, 100, true)
 
-	vec_avoid := pixel.V(0.0, 0.0)
-	count_avoid := 0.0
-	vec_align := pixel.V(0.0, 0.0)
-	count_align := 0.0
-	vec_cohesion := pixel.V(0.0, 0.0)
-	count_cohesion := 0.0
-	vec_separation := pixel.V(0.0, 0.0)
-	count_separation := 0.0
-
+	vec_avoid, vec_align, vec_cohesion, vec_separation := pixel.V(0.0, 0.0), pixel.V(0.0, 0.0),
+	pixel.V(0.0, 0.0), pixel.V(0.0, 0.0)
+	count_avoid, count_align, count_cohesion, count_separation := 0.0, 0.0, 0.0, 0.0
 
 	// Rules for boids
 	for _, bNear := range boidsNear{
@@ -242,11 +236,8 @@ func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
 
 	boidsNear, nearestBoid := b.boids_near(otherBoids, 300, false)
 
-	vec_attack := pixel.V(0.0,0.0)
-	count_attack := 0.0
-
-	vec_cohesion := pixel.V(0.0, 0.0)
-	count_cohesion := 0.0
+	vec_attack, vec_cohesion := pixel.V(0.0,0.0), pixel.V(0.0, 0.0)
+	count_attack, count_cohesion := 0.0, 0.0
 
 
 	for _, bNear := range boidsNear{
@@ -277,9 +268,7 @@ func (b *Boid) updateHunter (otherBoids []*Boid, outBoid chan *Boid) {
 	limitAcc(acceleration)
 	updatedBoid.velocity = updatedBoid.velocity.Add( acceleration )
 	updatedBoid.limitVelo()
-
 	updatedBoid.position = updatedBoid.position.Add( updatedBoid.velocity)
-
 	updatedBoid.restrictBounds()
 
 	outBoid <- updatedBoid
@@ -316,7 +305,6 @@ func drawWorker(last_state *[]*Boid, state_channel chan []*Boid,  win *pixelgl.W
 	if ok {
 		*last_state = x
 		draw_state( x, win )
-
 	}
 	wg.Done()
 }
@@ -341,7 +329,6 @@ func loop_state(last_state []*Boid,  state_channel chan []*Boid, boid_updates ch
 	wg.Add(2)
 	go updateWorker(len(last_state), new_state,  boid_updates, &wg)
 	go updateWorker(len(last_state_hunter), new_state_hunter,  hunter_updates, &wg)
-
 	wg.Wait()
 
 	state_channel <- new_state
